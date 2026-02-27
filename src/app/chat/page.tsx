@@ -9,6 +9,8 @@ import LogoutButton from './LogoutButton'
 interface Message {
   role: 'user' | 'assistant'
   content: string
+  imageData?: string  // base64 encoded image
+  mimeType?: string   // image mime type
 }
 
 interface Session {
@@ -135,6 +137,30 @@ export default function ChatPage() {
           return updated
         })
         return
+      }
+
+      // 检查是否是图片响应（非流式）
+      const contentType = res.headers.get('Content-Type')
+      if (contentType?.includes('application/json')) {
+        const data = await res.json()
+        if (data.type === 'image') {
+          // 图片生成响应
+          setMessages(prev => {
+            const updated = [...prev]
+            const last = updated[updated.length - 1]
+            if (last?.role === 'assistant') {
+              updated[updated.length - 1] = { 
+                ...last, 
+                content: data.message,
+                imageData: data.imageData,
+                mimeType: data.mimeType
+              }
+            }
+            return updated
+          })
+          loadSessions()
+          return
+        }
       }
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -301,6 +327,17 @@ export default function ChatPage() {
                     ? 'bg-green-500 text-white rounded-br-sm'
                     : 'bg-white text-gray-800 border border-gray-200 rounded-bl-sm shadow-sm'
                 }`}>
+                  {/* 图片消息 */}
+                  {msg.imageData && (
+                    <div className="mb-2">
+                      <img 
+                        src={`data:${msg.mimeType || 'image/png'};base64,${msg.imageData}`}
+                        alt="Generated image"
+                        className="max-w-full rounded-lg"
+                      />
+                    </div>
+                  )}
+                  {/* 文字内容 */}
                   {msg.content ? (
                     msg.role === 'assistant' ? (
                       <div className="prose prose-sm max-w-none prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 prose-pre:bg-gray-900 prose-pre:text-gray-100 prose-code:text-green-600 prose-code:before:content-none prose-code:after:content-none">

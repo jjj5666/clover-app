@@ -40,6 +40,29 @@ async function generateSessionTitle(supabase: any, sessionId: string, firstMessa
   } catch {}
 }
 
+// 检测图片生成意图（支持多语言）
+const IMAGE_INTENT_PATTERNS = [
+  /^画[一只个张幅]?(.+)$/i,           // 画一只猫
+  /^画[一个]?(.+)$/i,                 // 画一个房子
+  /^生成[一张]?(.+)[图片图像]?$/i,      // 生成一张风景图
+  /^生成[图片图像][：:]?(.+)$/i,        // 生成图片：xxx
+  /^给我画[一个]?(.+)$/i,              // 给我画一个xxx
+  /^create[\s\w]*image[\sof]*(.+)$/i, // create an image of
+  /^draw[\s\w]*(.+)$/i,               // draw a cat
+  /^generate[\s\w]*image[\sof]*(.+)$/i, // generate an image
+  /^imagine[\s\w]*(.+)$/i,            // imagine a scene
+]
+
+function detectImageIntent(text: string): { isImageRequest: boolean; imagePrompt: string } {
+  for (const pattern of IMAGE_INTENT_PATTERNS) {
+    const match = text.match(pattern)
+    if (match && match[1]) {
+      return { isImageRequest: true, imagePrompt: match[1].trim() }
+    }
+  }
+  return { isImageRequest: false, imagePrompt: '' }
+}
+
 // 基础系统提示词
 const BASE_SYSTEM_PROMPT = `You are Clover, a friendly AI assistant.
 
@@ -289,6 +312,37 @@ export async function POST(req: NextRequest) {
   const lastUserMsg = messages[messages.length - 1]
   if (lastUserMsg?.role === 'user') {
     await saveMessage(supabase, sessionId, user.id, 'user', lastUserMsg.content)
+  }
+
+  // 【图片生成】检测意图，自动调用 Nano Banana
+  const { isImageRequest, imagePrompt } = detectImageIntent(lastUserMsg?.content || '')
+  if (isImageRequest && process.env.GEMINI_API_KEY) {
+    try {
+      const { generateImage } = await import('@/lib/image/generate')
+      const { imageData, mimeType } = await generateImage(imagePrompt, process.env.GEMINI_API_KEY)
+      
+      // 保存生成的图片到数据库
+      await supabase.from('generated_images').insert({
+        user_id: user.id,
+        prompt: imagePrompt,
+        image_data: imageData,
+        mime_type: mimeType,
+      })
+      
+      // 返回特殊格式的响应，前端识别后显示图片
+      return new Response(JSON.stringify({
+        type: 'image',
+        imageData,
+        mimeType,
+        prompt: imagePrompt,
+        message: `为你生成了：${imagePrompt}`
+      }), {
+        headers: { 'Content-Type': 'application/json' }
+      })
+    } catch (imageError: any) {
+      console.error('Image generation error:', imageError)
+      // 图片生成失败，继续正常对话
+    }
   }
 
   // 检查用户计划（试用/免费/Pro）
