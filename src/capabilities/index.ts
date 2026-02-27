@@ -14,3 +14,5 @@ import './providers/image-generation';
 import './providers/builder';
 import './providers/daily-review';
 import './providers/screen-time';
+import './providers/daily-review';
+import './providers/screen-time';

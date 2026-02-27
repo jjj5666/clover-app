@@ -1,128 +1,113 @@
 // 屏幕时间分析能力
-// 接收 iOS Shortcut 上报的屏幕时间数据，生成报告
+// 接入 iOS Shortcut 数据，生成每日报告
 
 import { registerCapability } from '../registry';
 import { ExecutionContext, ExecutionResult } from '../types';
 
 registerCapability({
   id: 'screen-time',
-  name: '屏幕时间分析',
-  description: '分析每日屏幕使用时间，识别趋势和异常',
+  name: '屏幕时间',
+  description: '记录和分析每日屏幕使用时间',
   type: 'builtin',
-
+  
   intent: {
     patterns: [
-      /^屏幕时间/i,
-      /^今天(用了)?多少(时间|小时)/i,
-      /^手机(使用)?(时间|情况)/i,
-      /^screen( time)?/i,
-      /^how much time (did I spend|have I spent)/i,
+      /^屏幕时间(怎么样|如何|多少|分析)?/i,
+      /^今天用了多久手机/i,
+      /^(查看|给我|帮我)?(屏幕|手机)?(时间|使用)/i,
+      /^screen(\s+)?time/i,
+      /^how\s+much\s+time\s+did\s+i\s+spend/i,
     ],
-    aiDescription: '用户想要查看今天的屏幕使用时间统计和分析',
+    aiDescription: '用户想要查看今天的屏幕使用时间或分析报告',
     examples: [
-      '屏幕时间',
+      '屏幕时间怎么样',
       '今天用了多久手机',
-      'screen time',
-      '我这周屏幕时间怎么样',
+      '给我看看屏幕时间分析',
+      'screen time report',
     ],
   },
-
+  
   parameters: [
     {
       name: 'period',
       type: 'enum',
       required: false,
       description: '查询时间段',
-      enum: ['今天', '昨天', '本周', '上周', '本月'],
+      enum: ['today', 'yesterday', 'week', 'month'],
     },
   ],
-
+  
   render: {
     type: 'card',
   },
-
+  
   execute: async (params: any, context: ExecutionContext): Promise<ExecutionResult> => {
+    const { createClient } = await import('@/lib/supabase/server')
+    const supabase = await createClient()
+    
+    const period = params.period || 'today'
+    const today = new Date().toISOString().split('T')[0]
+    
     try {
-      const { createClient } = await import('@/lib/supabase/server')
-      const supabase = await createClient()
-
-      // 获取最近的屏幕时间数据
-      const { data: screenTimeData } = await supabase
+      // 获取屏幕时间数据
+      let query = supabase
         .from('screen_time_logs')
         .select('*')
         .eq('user_id', context.userId)
-        .order('date', { ascending: false })
-        .limit(7)
-
-      if (!screenTimeData || screenTimeData.length === 0) {
+      
+      if (period === 'today') {
+        query = query.eq('date', today)
+      } else if (period === 'yesterday') {
+        const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0]
+        query = query.eq('date', yesterday)
+      } else if (period === 'week') {
+        const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString()
+        query = query.gte('date', weekAgo).order('date', { ascending: false })
+      }
+      
+      const { data: logs } = await query
+      
+      if (!logs || logs.length === 0) {
         return {
           success: true,
           data: {
-            title: '屏幕时间',
-            content: '暂无数据。使用 iOS Shortcut 自动上报屏幕时间，或手动记录。',
-            setup: true,
+            message: '还没有屏幕时间数据',
+            setupInstructions: '使用 iOS Shortcut 将屏幕时间数据发送到 Clover',
           },
           metadata: {
-            title: '屏幕时间分析',
-            description: '数据未接入',
-            actions: [
-              {
-                id: 'setup',
-                label: '查看接入方法',
-                type: 'custom',
-              },
-            ],
+            title: '屏幕时间',
+            description: '暂无数据。请配置 iOS Shortcut 自动上报。',
           },
         }
       }
-
-      // 计算统计
-      const today = screenTimeData[0]
-      const avgMinutes = Math.round(
-        screenTimeData.reduce((sum, d) => sum + d.total_minutes, 0) / screenTimeData.length
-      )
       
-      // 构建报告
-      const topApps = today.app_usage
-        ? Object.entries(today.app_usage)
-            .sort((a: any, b: any) => b[1] - a[1])
-            .slice(0, 3)
-        : []
-
-      let report = `今日屏幕时间：${Math.floor(today.total_minutes / 60)}小时${today.total_minutes % 60}分钟\n\n`
+      // 计算总时间
+      const totalMinutes = logs.reduce((sum: number, log: any) => sum + (log.minutes || 0), 0)
+      const hours = Math.floor(totalMinutes / 60)
+      const minutes = totalMinutes % 60
       
-      if (topApps.length > 0) {
-        report += '主要使用：\n'
-        topApps.forEach(([app, minutes]: [string, any]) => {
-          report += `• ${app}: ${Math.floor(minutes as number / 60)}小时${(minutes as number) % 60}分钟\n`
-        })
-        report += '\n'
-      }
+      // 分类统计
+      const byCategory: Record<string, number> = {}
+      logs.forEach((log: any) => {
+        const cat = log.category || '其他'
+        byCategory[cat] = (byCategory[cat] || 0) + (log.minutes || 0)
+      })
       
-      report += `近7天平均：${Math.floor(avgMinutes / 60)}小时${avgMinutes % 60}分钟/天`
-
       return {
         success: true,
         data: {
-          title: '屏幕时间报告',
-          content: report,
-          stats: {
-            today: today.total_minutes,
-            average: avgMinutes,
-          },
+          totalMinutes,
+          formatted: `${hours}小时${minutes}分钟`,
+          byCategory,
+          logs,
         },
         metadata: {
-          title: '屏幕时间分析',
-          description: today.date,
+          title: period === 'today' ? '今日屏幕时间' : '屏幕时间报告',
+          description: `今天使用了 ${hours}小时${minutes}分钟`,
           actions: [
             {
-              id: 'trend',
-              label: '查看趋势',
-              type: 'custom',
-            },
-            {
-              id: 'settings',
-              label: '设置提醒',
+              id: 'weekly-report',
+              label: '查看周报',
               type: 'custom',
             },
           ],
@@ -136,7 +121,7 @@ registerCapability({
       }
     }
   },
-
+  
   permissions: {
     requireAuth: true,
     plan: ['free', 'pro'],

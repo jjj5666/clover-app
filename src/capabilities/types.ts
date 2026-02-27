@@ -26,6 +26,7 @@ export interface RenderConfig {
     allowDeploy?: boolean;
     allowEdit?: boolean;
     showCode?: boolean;
+    showTimestamp?: boolean;
     height?: string;
   };
 }

@@ -1,33 +1,36 @@
 // 每日回顾能力
-// 基于记忆系统生成每日总结
+// 自动或手动触发，生成今日总结
 
 import { registerCapability } from '../registry';
 import { ExecutionContext, ExecutionResult } from '../types';
 
 // 生成每日回顾
 async function generateDailyReview(
-  messages: any[],
-  memories: string,
-  screenTime: any,
-  apiKey: string
+  userId: string,
+  apiKey: string,
+  supabase: any
 ): Promise<string> {
+  // 获取今天和昨天的消息
   const today = new Date().toISOString().split('T')[0]
+  const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0]
   
-  // 构建上下文
-  let context = `今天是 ${today}\n\n`
+  const { data: messages } = await supabase
+    .from('messages')
+    .select('role, content, created_at')
+    .eq('user_id', userId)
+    .gte('created_at', `${yesterday}T00:00:00`)
+    .order('created_at', { ascending: true })
   
-  if (memories) {
-    context += `用户画像：\n${memories}\n\n`
+  if (!messages || messages.length === 0) {
+    return '今天还没有对话记录。'
   }
   
-  if (messages.length > 0) {
-    context += `今日对话：\n${messages.map(m => `${m.role}: ${m.content}`).join('\n')}\n\n`
-  }
+  // 用 AI 生成回顾
+  const conversationText = messages
+    .map((m: any) => `${m.role}: ${m.content}`)
+    .join('\n')
+    .slice(0, 8000)  // 限制长度
   
-  if (screenTime) {
-    context += `屏幕时间：\n${JSON.stringify(screenTime)}\n\n`
-  }
-
   const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -39,132 +42,97 @@ async function generateDailyReview(
       messages: [
         {
           role: 'system',
-          content: `你是 Clover 的每日回顾生成器。
+          content: `总结用户的今日对话，提取：
+1. 今天做出的重要决定
+2. 提到的新计划或目标
+3. 重要事件或进展
+4. 情绪/状态变化
 
-生成一份温暖、简洁的每日回顾，包含：
-1. 今天的重要决策和行动
-2. 情绪波动（如果有体现）
-3. 值得关注的新信息
-4. 明天的建议（轻量级）
-
-风格：像朋友聊天，不要罗列，不要机械。
-长度：200字以内。`,
+用温暖的语气，不超过 300 字。`,
         },
-        { role: 'user', content: context },
+        { role: 'user', content: conversationText },
       ],
     }),
   })
-
+  
   const data = await res.json()
-  return data.choices?.[0]?.message?.content?.trim() || '今日暂无特别记录'
+  return data.choices?.[0]?.message?.content || '今日回顾生成失败'
 }
 
 registerCapability({
   id: 'daily-review',
   name: '每日回顾',
-  description: '生成每日总结，包括对话、屏幕时间、重要事件',
+  description: '自动总结今天的对话和重要事项',
   type: 'builtin',
-
+  
   intent: {
     patterns: [
-      /^(今天|今日)?(总结|回顾|怎么样|如何)$/i,
-      /^今天(发生)?(了)?什么/i,
-      /^今日(回顾|总结)/i,
-      /^daily( review)?/i,
-      /^today('s)? summary/i,
+      /^(今天|今日)(过得|怎么样|如何|总结|回顾)/i,
+      /^总结(一下)?今天/i,
+      /^(给我|帮我)?(生成|做|写)?(一个)?(今日|今天)?(回顾|总结)/i,
+      /^daily(\s+)?review/i,
+      /^today['']?s?\s+(summary|review)/i,
     ],
-    aiDescription: '用户想要查看今天的总结回顾，包括对话、活动、情绪等',
+    aiDescription: '用户想要回顾今天的对话内容、重要决策或事件',
     examples: [
-      '今天怎么样',
-      '今日回顾',
-      '今天发生了什么',
-      'daily review',
+      '今天过得怎么样',
+      '帮我总结今天',
+      '生成今日回顾',
+      "today's summary",
     ],
   },
-
+  
   parameters: [
     {
       name: 'date',
       type: 'string',
       required: false,
-      description: '回顾的日期，默认今天',
+      description: '回顾日期（默认今天），格式 YYYY-MM-DD',
     },
   ],
-
+  
   render: {
     type: 'card',
+    options: {
+      showTimestamp: true,
+    },
   },
-
+  
   execute: async (params: any, context: ExecutionContext): Promise<ExecutionResult> => {
-    const openRouterKey = process.env.OPENROUTER_API_KEY
-    if (!openRouterKey) {
-      return {
-        success: false,
-        data: null,
-        error: '每日回顾功能未配置',
-      }
-    }
-
+    const { createClient } = await import('@/lib/supabase/server')
+    const supabase = await createClient()
+    
     try {
-      // 获取今日数据
-      const today = new Date().toISOString().split('T')[0]
-      const { createClient } = await import('@/lib/supabase/server')
-      const supabase = await createClient()
-
-      // 获取今日对话
-      const { data: messages } = await supabase
-        .from('messages')
-        .select('role, content')
-        .eq('user_id', context.userId)
-        .gte('created_at', `${today}T00:00:00`)
-        .order('created_at', { ascending: true })
-        .limit(50)
-
-      // 获取用户画像
-      const { data: memoryData } = await supabase
-        .from('user_memories')
-        .select('content')
-        .eq('user_id', context.userId)
-        .single()
-
-      // 生成回顾
       const review = await generateDailyReview(
-        messages || [],
-        memoryData?.content || '',
-        null,  // 屏幕时间稍后接入
-        openRouterKey
+        context.userId,
+        process.env.OPENROUTER_API_KEY || '',
+        supabase
       )
-
-      // 保存回顾
-      await supabase.from('daily_reviews').upsert({
-        user_id: context.userId,
-        date: today,
-        content: review,
-      }, {
-        onConflict: 'user_id,date'
-      })
-
+      
+      // 保存到数据库
+      const today = new Date().toISOString().split('T')[0]
+      await supabase.from('daily_reviews').upsert(
+        {
+          user_id: context.userId,
+          date: today,
+          content: review,
+        },
+        { onConflict: 'user_id,date' }
+      )
+      
       return {
         success: true,
         data: {
-          title: `${today} 回顾`,
           content: review,
-          stats: {
-            messages: messages?.length || 0,
-          }
+          date: today,
         },
         metadata: {
-          title: '每日回顾',
-          description: today,
+          title: `${today} 每日回顾`,
+          description: review,
           actions: [
             {
               id: 'share',
               label: '分享',
-              type: 'custom',
-            },
-            {
-              id: 'history',
-              label: '查看历史',
               type: 'custom',
             },
           ],
@@ -178,11 +146,11 @@ registerCapability({
       }
     }
   },
-
+  
   permissions: {
     requireAuth: true,
-    plan: ['pro'],  // Pro 功能
+    plan: ['free', 'pro'],
     userConfigurable: true,
-    defaultEnabled: false,
+    defaultEnabled: true,
   },
 })
