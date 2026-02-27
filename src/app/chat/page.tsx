@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState, useCallback } from 'react'
+import ReactMarkdown from 'react-markdown'
 import { createClient } from '@/lib/supabase/client'
 import { User } from '@supabase/supabase-js'
 import LogoutButton from './LogoutButton'
@@ -285,7 +286,13 @@ export default function ChatPage() {
                     ? 'bg-green-500 text-white rounded-br-sm'
                     : 'bg-white text-gray-800 border border-gray-200 rounded-bl-sm shadow-sm'
                 }`}>
-                  {msg.content || (msg.role === 'assistant' && isLoading ? (
+                  {msg.content ? (
+                    msg.role === 'assistant' ? (
+                      <div className="prose prose-sm max-w-none prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 prose-pre:bg-gray-900 prose-pre:text-gray-100 prose-code:text-green-600 prose-code:before:content-none prose-code:after:content-none">
+                        <ReactMarkdown>{msg.content}</ReactMarkdown>
+                      </div>
+                    ) : msg.content
+                  ) : (msg.role === 'assistant' && isLoading ? (
                     <span className="inline-flex gap-1 items-center h-4">
                       <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce [animation-delay:-0.3s]" />
                       <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce [animation-delay:-0.15s]" />
