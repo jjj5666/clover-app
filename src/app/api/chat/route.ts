@@ -3,6 +3,7 @@ import { NextRequest } from 'next/server'
 import { getProfile, updateProfile } from '@/lib/memory/profile'
 import { getDailySummaries } from '@/lib/memory/summary'
 import { checkLimit } from '@/lib/billing/limits'
+import { getUserPlan } from '@/lib/billing/plans'
 import { embedMessage, searchMessages } from '@/lib/memory/search'
 import { compressMemory } from '@/lib/memory/observer'
 
@@ -285,11 +286,12 @@ export async function POST(req: NextRequest) {
     await saveMessage(supabase, sessionId, user.id, 'user', lastUserMsg.content)
   }
 
-  // 加载用户画像
-  const memoryContent = await getProfile(supabase, user.id)
+  // 检查用户计划（试用/免费/Pro）
+  const userPlan = await getUserPlan(supabase, user.id)
 
-  // 加载最近2天的摘要
-  const summaries = await getDailySummaries(supabase, user.id, 2)
+  // 只有有记忆权限的用户才加载记忆
+  const memoryContent = userPlan.hasMemory ? await getProfile(supabase, user.id) : ''
+  const summaries = userPlan.hasMemory ? await getDailySummaries(supabase, user.id, 2) : []
 
   // 加载上一次session的最后几轮（跨session连续性）
   let previousContext = ''
@@ -449,7 +451,8 @@ export async function POST(req: NextRequest) {
               })
           }
 
-          // 异步提取记忆，不阻塞响应
+          // 只有有记忆权限才提取
+          if (!userPlan.hasMemory) return
           autoExtractMemory(
             supabase,
             user.id,
