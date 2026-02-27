@@ -113,6 +113,12 @@ export default function ChatPage() {
         }),
       })
 
+      // 登录态失效 → 跳转登录
+      if (res.status === 401) {
+        window.location.href = '/login'
+        return
+      }
+
       if (res.status === 429) {
         const data = await res.json()
         setLimitReached(true)
@@ -197,11 +203,12 @@ export default function ChatPage() {
   const formatDate = (iso: string) => {
     const d = new Date(iso)
     const today = new Date()
-    if (d.toDateString() === today.toDateString()) return 'Today'
+    const time = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
+    if (d.toDateString() === today.toDateString()) return `Today ${time}`
     const yesterday = new Date(today)
     yesterday.setDate(yesterday.getDate() - 1)
-    if (d.toDateString() === yesterday.toDateString()) return 'Yesterday'
-    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    if (d.toDateString() === yesterday.toDateString()) return `Yesterday ${time}`
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ` ${time}`
   }
 
   return (
@@ -233,8 +240,8 @@ export default function ChatPage() {
                 currentSessionId === s.id ? 'bg-green-50 text-green-700' : 'text-gray-600'
               }`}
             >
-              <span className="block truncate">{s.title || formatDate(s.created_at)}</span>
-              {s.title && <span className="block text-xs text-gray-400 truncate">{formatDate(s.created_at)}</span>}
+              <span className="block truncate font-medium">{s.title || 'New conversation'}</span>
+              <span className="block text-xs text-gray-400 truncate">{formatDate(s.created_at)}</span>
             </button>
           ))}
           {sessions.length === 0 && (
@@ -253,7 +260,7 @@ export default function ChatPage() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
               </svg>
             </button>
-            <h1 className="text-xl font-semibold">🍀 Clover</h1>
+            <h1 className="text-xl font-bold text-gray-900">🍀 Clover</h1>
           </div>
           <div className="flex items-center gap-4">
             {usage && <span className="text-xs text-gray-400">{usage.used}/{usage.limit}</span>}

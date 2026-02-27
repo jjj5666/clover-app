@@ -4,6 +4,7 @@ import { getProfile, updateProfile } from '@/lib/memory/profile'
 import { getDailySummaries } from '@/lib/memory/summary'
 import { checkLimit } from '@/lib/billing/limits'
 import { embedMessage, searchMessages } from '@/lib/memory/search'
+import { compressMemory } from '@/lib/memory/observer'
 
 // 异步生成 session 标题
 async function generateSessionTitle(supabase: any, sessionId: string, firstMessage: string) {
@@ -62,33 +63,28 @@ async function autoExtractMemory(
         messages: [
           {
             role: 'system',
-            content: `你是一个精准的记忆提取器。分析用户的最新对话，判断是否包含值得长期记住的新信息。
+            content: `你是一个精准的记忆提取器。从对话中提取值得长期记住的**新信息**。
 
-当前已记住的内容：
-${existingMemory || '（空）'}
-
-## 什么值得记住（高标准）
+## 什么值得提取
 - 用户的身份信息（姓名、职业、所在地）
-- 明确表达的偏好（"我喜欢…"、"我不喜欢…"）
+- 明确表达的偏好
 - 正在做的项目或目标
-- 提到的具体的人及其关系（"我同事小李"、"我女朋友"）
-- 重要的生活事件（搬家、换工作、生病）
+- 提到的人及其关系
+- 重要生活事件
 
-## 什么不值得记住（严格过滤）
-- 闲聊、问候、寒暄（"你好"、"谢谢"、"今天天气不错"）
-- 一般性知识讨论（"什么是量子计算"）
-- AI的回复内容（只关注用户说的）
-- 模糊的、一次性的、不确定的信息
-- 对话中的指令（"帮我翻译这段话"）
-
-## 冲突处理
-- 如果新信息和已有记忆直接矛盾（如地点变了、偏好变了），用新的替换旧的
-- 如果是补充（新细节），合并到已有条目
+## 什么不提取
+- 闲聊、问候
+- 一般性知识讨论
+- AI的回复内容
+- 模糊或一次性的信息
 
 ## 输出规则
-- 如果本轮对话没有任何值得记住的新信息，只返回：NO_UPDATE
-- 如果有新信息，返回更新后的完整记忆文本（markdown格式，每条以 - 开头）
-- 不要返回解释、说明、或其他任何内容`,
+- 如果没有值得记住的新信息，只返回：NO_UPDATE
+- 如果有，只返回新增的条目（每条以 - 开头），不要重复已有的内容
+- 如果新信息和已有内容矛盾，返回格式：REPLACE: 旧内容 -> 新内容
+
+已有记忆（不要重复这些）：
+${existingMemory || '（空）'}`,
           },
           {
             role: 'user',
@@ -99,11 +95,31 @@ ${existingMemory || '（空）'}
     })
 
     const data = await res.json()
-    const newMemory = data.choices?.[0]?.message?.content?.trim()
+    const extracted = data.choices?.[0]?.message?.content?.trim()
 
-    // NO_UPDATE 表示没有值得记忆的新信息，跳过写入
-    if (newMemory && newMemory !== 'NO_UPDATE' && newMemory !== existingMemory) {
-      await updateProfile(supabase, userId, newMemory)
+    if (extracted && extracted !== 'NO_UPDATE') {
+      let updatedMemory = existingMemory || ''
+
+      // 处理 REPLACE 指令（矛盾更新）
+      if (extracted.includes('REPLACE:')) {
+        const lines = extracted.split('\n')
+        for (const line of lines) {
+          const match = line.match(/REPLACE:\s*(.+?)\s*->\s*(.+)/)
+          if (match) {
+            updatedMemory = updatedMemory.replace(match[1].trim(), match[2].trim())
+          }
+        }
+        // 也处理非REPLACE行作为新增
+        const newLines = lines.filter((l: string) => !l.includes('REPLACE:') && l.trim().startsWith('- '))
+        if (newLines.length > 0) {
+          updatedMemory = updatedMemory.trim() + '\n' + newLines.join('\n')
+        }
+      } else {
+        // 纯新增：追加到已有记忆后面
+        updatedMemory = updatedMemory.trim() + '\n' + extracted.trim()
+      }
+
+      await updateProfile(supabase, userId, updatedMemory.trim())
     }
 
     // 同时提取人物关系
@@ -421,6 +437,16 @@ export async function POST(req: NextRequest) {
           // 异步生成session标题（仅第一轮）
           if (messages.length <= 1) {
             generateSessionTitle(supabase, sessionId, lastUserMsg?.content || '')
+          }
+
+          // 每5轮触发一次记忆压缩去重
+          if (messages.length > 0 && messages.length % 5 === 0 && memoryContent) {
+            compressMemory(memoryContent, process.env.OPENROUTER_API_KEY || '')
+              .then(compressed => {
+                if (compressed !== memoryContent) {
+                  updateProfile(supabase, user.id, compressed)
+                }
+              })
           }
 
           // 异步提取记忆，不阻塞响应

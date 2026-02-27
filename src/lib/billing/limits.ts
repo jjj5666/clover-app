@@ -2,7 +2,7 @@
 import { SupabaseClient } from '@supabase/supabase-js'
 
 // 免费用户每日消息上限
-export const FREE_LIMIT = 20
+export const FREE_LIMIT = 999  // 开发阶段不限制，上线前改回来
 
 // 获取用户今日已发送消息数
 export async function getMessageCount(supabase: SupabaseClient, userId: string): Promise<number> {
