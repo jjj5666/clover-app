@@ -314,12 +314,12 @@ export async function POST(req: NextRequest) {
     await saveMessage(supabase, sessionId, user.id, 'user', lastUserMsg.content)
   }
 
-  // 【图片生成】检测意图，自动调用 Nano Banana
+  // 【图片生成】检测意图，自动调用 Nano Banana (via OpenRouter)
   const { isImageRequest, imagePrompt } = detectImageIntent(lastUserMsg?.content || '')
-  if (isImageRequest && process.env.GEMINI_API_KEY) {
+  if (isImageRequest && process.env.OPENROUTER_API_KEY) {
     try {
       const { generateImage } = await import('@/lib/image/generate')
-      const { imageData, mimeType } = await generateImage(imagePrompt, process.env.GEMINI_API_KEY)
+      const { imageData, mimeType } = await generateImage(imagePrompt, process.env.OPENROUTER_API_KEY)
       
       // 保存生成的图片到数据库
       await supabase.from('generated_images').insert({
