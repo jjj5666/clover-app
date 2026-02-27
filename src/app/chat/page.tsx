@@ -26,6 +26,7 @@ export default function ChatPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [usage, setUsage] = useState<{ used: number; limit: number } | null>(null)
   const [limitReached, setLimitReached] = useState(false)
+  const [plan, setPlan] = useState<{ plan: string; trialEndsAt: string | null; hasMemory: boolean } | null>(null)
 
   // 侧边栏
   const [sessions, setSessions] = useState<Session[]>([])
@@ -39,6 +40,7 @@ export default function ChatPage() {
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => setUser(user))
     fetch('/api/usage').then(r => r.json()).then(setUsage).catch(() => {})
+    fetch('/api/plan').then(r => r.json()).then(setPlan).catch(() => {})
     loadSessions()
   }, [])
 
@@ -264,7 +266,19 @@ export default function ChatPage() {
             <h1 className="text-xl font-bold text-gray-900">🍀 Clover</h1>
           </div>
           <div className="flex items-center gap-4">
-            {usage && <span className="text-xs text-gray-400">{usage.used}/{usage.limit}</span>}
+            {plan && plan.plan === 'trial' && plan.trialEndsAt && (
+              <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full">
+                Trial · {Math.max(0, Math.ceil((new Date(plan.trialEndsAt).getTime() - Date.now()) / 86400000))}d left
+              </span>
+            )}
+            {plan && plan.plan === 'free' && (
+              <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-1 rounded-full">
+                Free · No memory
+              </span>
+            )}
+            {plan && plan.plan === 'pro' && (
+              <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full">Pro</span>
+            )}
             <a href="/settings" className="text-sm text-gray-500 hover:text-gray-700">Settings</a>
             <LogoutButton />
           </div>
