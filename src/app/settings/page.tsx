@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import { getProfile } from '@/lib/memory/profile'
 import { getUserPlan } from '@/lib/billing/plans'
 import MemoryView from './MemoryView'
+import { CapabilitiesPanel } from './CapabilitiesPanel'
 
 export default async function SettingsPage() {
   const supabase = await createClient()
@@ -67,6 +68,15 @@ export default async function SettingsPage() {
           <div className="bg-white rounded-lg border p-6">
             <p className="text-sm text-gray-600">{user.email}</p>
           </div>
+        </div>
+
+        {/* 能力管理 */}
+        <div>
+          <h2 className="text-xl font-medium mb-2">能力管理</h2>
+          <p className="text-sm text-gray-500 mb-4">
+            启用或禁用 Clover 的能力，连接外部服务
+          </p>
+          <CapabilitiesPanel />
         </div>
 
         {/* 记忆面板 */}

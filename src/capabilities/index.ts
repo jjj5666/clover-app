@@ -12,3 +12,5 @@ export * from './types';
 // 注册内置能力（导入即注册）
 import './providers/image-generation';
 import './providers/builder';
+import './providers/daily-review';
+import './providers/screen-time';
