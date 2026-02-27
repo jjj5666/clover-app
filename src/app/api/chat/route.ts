@@ -6,6 +6,11 @@ import { checkLimit } from '@/lib/billing/limits'
 import { getUserPlan } from '@/lib/billing/plans'
 import { embedMessage, searchMessages } from '@/lib/memory/search'
 import { compressMemory } from '@/lib/memory/observer'
+import { getCompressedSessionMessages } from '@/lib/memory/session'
+
+// Session 压缩常量
+const COMPRESSION_THRESHOLD = 20  // 超过20轮触发压缩
+const KEEP_LAST_ROUNDS = 5        // 保留最后5轮完整对话
 
 // 异步生成 session 标题
 async function generateSessionTitle(supabase: any, sessionId: string, firstMessage: string) {
@@ -293,31 +298,40 @@ export async function POST(req: NextRequest) {
   const memoryContent = userPlan.hasMemory ? await getProfile(supabase, user.id) : ''
   const summaries = userPlan.hasMemory ? await getDailySummaries(supabase, user.id, 2) : []
 
-  // 加载上一次session的最后几轮（跨session连续性）
-  let previousContext = ''
-  if (messages.length <= 1) {
-    // 新对话的第一条消息，加载上次session的尾巴
-    const { data: prevSessions } = await supabase
-      .from('sessions')
-      .select('id')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false })
-      .limit(2)
+  // 【隐式继承】不再显式加载上次session尾巴，依靠向量检索动态注入相关历史
+  // 用户不提，AI不说；用户提相关话题时，向量检索会自动找到并注入
 
-    // 取倒数第二个session（当前session是最新的）
-    const prevSessionId = prevSessions?.[1]?.id || prevSessions?.[0]?.id
-    if (prevSessionId && prevSessionId !== sessionId) {
-      const { data: prevMsgs } = await supabase
-        .from('messages')
-        .select('role, content')
-        .eq('session_id', prevSessionId)
-        .order('created_at', { ascending: false })
-        .limit(6) // 最后3轮（6条消息）
-
-      if (prevMsgs && prevMsgs.length > 0) {
-        const reversed = prevMsgs.reverse()
-        previousContext = reversed.map((m: any) => `${m.role}: ${m.content}`).join('\n')
-      }
+  // 【Session 压缩】当前对话超过20轮时，压缩前面内容为摘要
+  let sessionContext = ''
+  if (messages.length > COMPRESSION_THRESHOLD) {
+    const messagesToCompress = messages.slice(0, -KEEP_LAST_ROUNDS * 2)
+    const compressionText = messagesToCompress
+      .map((m: any) => `${m.role}: ${m.content}`)
+      .join('\n')
+    
+    try {
+      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: 'moonshotai/kimi-k2.5',
+          messages: [
+            {
+              role: 'system',
+              content: '总结以下对话的关键信息（决策、约定、背景）。200字以内，简洁。',
+            },
+            { role: 'user', content: compressionText },
+          ],
+        }),
+      })
+      const data = await res.json()
+      sessionContext = data.choices?.[0]?.message?.content?.trim() || ''
+    } catch {
+      // 压缩失败则直接截断
+      sessionContext = '[Earlier conversation truncated due to length]'
     }
   }
 
@@ -344,23 +358,27 @@ export async function POST(req: NextRequest) {
       .join('\n\n')
     systemPrompt += `\n\n[Recent conversation summaries]\n${summaryText}`
   }
-  if (previousContext) {
-    systemPrompt += `\n\n[End of last conversation — for continuity, do not repeat]\n${previousContext}`
+  
+  // 添加当前session压缩摘要（如果有）
+  if (sessionContext) {
+    systemPrompt += `\n\n[Earlier in this conversation]\n${sessionContext}`
   }
 
-  // 向量检索：用最新用户消息搜索相关历史（网络失败则跳过）
+  // 【向量检索】用最新用户消息搜索跨session相关历史
+  // 使用统一相关性分数（相似度 × 时间衰减 × 热度），阈值0.6
   try {
     const lastUserContent = lastUserMsg?.content || ''
     if (lastUserContent.length > 10) {
-      const searchResults = await searchMessages(supabase, user.id, lastUserContent, 3)
+      // 智能判断：只有当消息看起来在引用过去时才降低阈值
+      const isReferencingPast = /(之前|上次|以前|你记得|提到过|后来怎样|进展如何)/i.test(lastUserContent)
+      const minRelevance = isReferencingPast ? 0.45 : 0.6
+      
+      const searchResults = await searchMessages(supabase, user.id, lastUserContent, 3, minRelevance)
       if (searchResults.length > 0) {
         const relevantHistory = searchResults
-          .filter((r: any) => r.similarity > 0.7)
           .map((r: any) => `[${new Date(r.created_at).toLocaleDateString()}] ${r.role}: ${r.content}`)
           .join('\n')
-        if (relevantHistory) {
-          systemPrompt += `\n\n[Relevant past conversations — reference only when helpful]\n${relevantHistory}`
-        }
+        systemPrompt += `\n\n[Relevant past conversations — reference only when helpful]\n${relevantHistory}`
       }
     }
   } catch {
@@ -370,9 +388,14 @@ export async function POST(req: NextRequest) {
   // MVP统一用 Sonnet 4.6
   const model = 'anthropic/claude-sonnet-4.6'
 
+  // 如果已压缩，只保留最后5轮完整对话
+  const messagesToSend = sessionContext 
+    ? messages.slice(-KEEP_LAST_ROUNDS * 2) 
+    : messages
+
   const openRouterMessages = [
     { role: 'system', content: systemPrompt },
-    ...messages,
+    ...messagesToSend,
   ]
 
   // 调用 OpenRouter 流式接口
