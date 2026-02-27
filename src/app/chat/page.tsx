@@ -203,7 +203,10 @@ export default function ChatPage() {
   }
 
   // 格式化 session 日期
-  const formatDate = (iso: string) => {
+  // Builder 命令检测
+const BUILDER_PATTERN = /^/(builder|make|create)\s+(.+)$/i
+
+const formatDate = (iso: string) => {
     const d = new Date(iso)
     const today = new Date()
     const time = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
@@ -279,6 +282,7 @@ export default function ChatPage() {
             {plan && plan.plan === 'pro' && (
               <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full">Pro</span>
             )}
+            <a href="/builder" className="text-sm text-blue-600 font-medium hover:text-blue-700"> Builder</a>
             <a href="/settings" className="text-sm text-gray-500 hover:text-gray-700">Settings</a>
             <LogoutButton />
           </div>
