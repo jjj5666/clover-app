@@ -2,52 +2,60 @@
 
 import { useState } from 'react'
 
+interface MemorySection {
+  title: string
+  items: string[]
+}
+
+function parseMemory(memory: string): MemorySection[] {
+  if (!memory) return []
+
+  const sections: MemorySection[] = []
+  let currentTitle = '其他'
+  let currentItems: string[] = []
+
+  for (const line of memory.split('\n')) {
+    const trimmed = line.trim()
+    if (trimmed.startsWith('## ')) {
+      // 保存上一个分组
+      if (currentItems.length > 0) {
+        sections.push({ title: currentTitle, items: currentItems })
+      }
+      currentTitle = trimmed.slice(3).trim()
+      currentItems = []
+    } else if (trimmed.startsWith('- ')) {
+      currentItems.push(trimmed.slice(2))
+    }
+  }
+  // 保存最后一个分组
+  if (currentItems.length > 0) {
+    sections.push({ title: currentTitle, items: currentItems })
+  }
+
+  return sections
+}
+
 export default function MemoryView({ initialMemory }: { initialMemory: string }) {
   const [memory, setMemory] = useState(initialMemory)
   const [saving, setSaving] = useState(false)
 
-  // 解析记忆文本为分组结构
-  const parseMemory = (text: string) => {
-    if (!text) return []
-
-    const groups: { title: string; items: string[] }[] = []
-    let currentGroup: { title: string; items: string[] } = { title: '记忆', items: [] }
-
-    for (const line of text.split('\n')) {
-      const trimmed = line.trim()
-      if (trimmed.startsWith('## ')) {
-        if (currentGroup.items.length > 0) groups.push(currentGroup)
-        currentGroup = { title: trimmed.slice(3), items: [] }
-      } else if (trimmed.startsWith('- ')) {
-        currentGroup.items.push(trimmed.slice(2))
-      }
-    }
-    if (currentGroup.items.length > 0) groups.push(currentGroup)
-
-    // 如果没有分组标题，所有条目放一个组
-    if (groups.length === 0) {
-      const items = text.split('\n').filter(l => l.trim().startsWith('- ')).map(l => l.trim().slice(2))
-      if (items.length > 0) groups.push({ title: '记忆', items })
-    }
-
-    return groups
-  }
-
-  const groups = parseMemory(memory)
-  const allItems = groups.flatMap(g => g.items)
+  const sections = parseMemory(memory)
+  const hasMemory = sections.some(s => s.items.length > 0)
 
   // 删除单条记忆
-  const handleDelete = async (groupIdx: number, itemIdx: number) => {
-    setSaving(true)
-    const newGroups = groups.map((g, gi) => ({
-      ...g,
-      items: g.items.filter((_, ii) => !(gi === groupIdx && ii === itemIdx))
-    })).filter(g => g.items.length > 0)
+  const handleDelete = async (sectionIdx: number, itemIdx: number) => {
+    const newSections = sections.map((s, si) => {
+      if (si === sectionIdx) {
+        return { ...s, items: s.items.filter((_, ii) => ii !== itemIdx) }
+      }
+      return s
+    }).filter(s => s.items.length > 0)
 
-    const newMemory = newGroups
-      .map(g => `## ${g.title}\n${g.items.map(i => `- ${i}`).join('\n')}`)
+    const newMemory = newSections
+      .map(s => `## ${s.title}\n${s.items.map(i => `- ${i}`).join('\n')}`)
       .join('\n\n')
 
+    setSaving(true)
     await fetch('/api/memory', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -70,7 +78,7 @@ export default function MemoryView({ initialMemory }: { initialMemory: string })
     setSaving(false)
   }
 
-  if (allItems.length === 0) {
+  if (!hasMemory) {
     return (
       <div className="bg-white rounded-lg border p-8 text-center">
         <p className="text-gray-400 text-lg">Nothing yet</p>
@@ -83,17 +91,17 @@ export default function MemoryView({ initialMemory }: { initialMemory: string })
 
   return (
     <div className="space-y-6">
-      {groups.map((group, gi) => (
-        <div key={gi}>
+      {sections.map((section, si) => (
+        <div key={si}>
           <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2">
-            {group.title}
+            {section.title}
           </h3>
           <div className="space-y-2">
-            {group.items.map((item, ii) => (
+            {section.items.map((item, ii) => (
               <div key={ii} className="bg-white rounded-lg border px-4 py-3 flex items-start justify-between gap-3">
                 <span className="text-sm text-gray-700 flex-1">{item}</span>
                 <button
-                  onClick={() => handleDelete(gi, ii)}
+                  onClick={() => handleDelete(si, ii)}
                   disabled={saving}
                   className="text-gray-300 hover:text-red-500 transition-colors flex-shrink-0 disabled:opacity-50"
                 >
