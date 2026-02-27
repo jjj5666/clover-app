@@ -7,6 +7,7 @@ import { getUserPlan } from '@/lib/billing/plans'
 import { embedMessage, searchMessages } from '@/lib/memory/search'
 import { compressMemory } from '@/lib/memory/observer'
 import { getCompressedSessionMessages } from '@/lib/memory/session'
+import { createEngine } from '@/capabilities'
 
 // Session 压缩常量
 const COMPRESSION_THRESHOLD = 20  // 超过20轮触发压缩
@@ -314,34 +315,45 @@ export async function POST(req: NextRequest) {
     await saveMessage(supabase, sessionId, user.id, 'user', lastUserMsg.content)
   }
 
-  // 【图片生成】检测意图，自动调用 Nano Banana (via OpenRouter)
-  const { isImageRequest, imagePrompt } = detectImageIntent(lastUserMsg?.content || '')
-  if (isImageRequest && process.env.OPENROUTER_API_KEY) {
+  // 【新架构】使用 Capability Engine 处理意图
+  if (process.env.OPENROUTER_API_KEY) {
     try {
-      const { generateImage } = await import('@/lib/image/generate')
-      const { imageData, mimeType } = await generateImage(imagePrompt, process.env.OPENROUTER_API_KEY)
+      const engine = createEngine(process.env.OPENROUTER_API_KEY)
+      const userPlan = await getUserPlan(supabase, user.id)
+      const memoryContent = userPlan.hasMemory ? await getProfile(supabase, user.id) : ''
       
-      // 保存生成的图片到数据库
-      await supabase.from('generated_images').insert({
-        user_id: user.id,
-        prompt: imagePrompt,
-        image_data: imageData,
-        mime_type: mimeType,
+      const capabilityResult = await engine.process(lastUserMsg?.content || '', {
+        userId: user.id,
+        sessionId,
+        userPlan: userPlan.plan,
+        memory: memoryContent,
+        messages,
       })
       
-      // 返回特殊格式的响应，前端识别后显示图片
-      return new Response(JSON.stringify({
-        type: 'image',
-        imageData,
-        mimeType,
-        prompt: imagePrompt,
-        message: `为你生成了：${imagePrompt}`
-      }), {
-        headers: { 'Content-Type': 'application/json' }
-      })
-    } catch (imageError: any) {
-      console.error('Image generation error:', imageError)
-      // 图片生成失败，继续正常对话
+      if (capabilityResult.matched && capabilityResult.result?.success) {
+        // 能力执行成功，返回结构化结果给前端渲染
+        return new Response(JSON.stringify({
+          type: 'capability',
+          capabilityId: capabilityResult.capabilityId,
+          renderType: capabilityResult.renderType,
+          result: capabilityResult.result,
+        }), {
+          headers: { 'Content-Type': 'application/json' }
+        })
+      } else if (capabilityResult.error) {
+        // 能力执行失败，返回错误
+        return new Response(JSON.stringify({
+          type: 'error',
+          error: capabilityResult.error,
+        }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' }
+        })
+      }
+      // 未匹配到能力，继续正常对话流程
+    } catch (engineError) {
+      console.error('Capability engine error:', engineError)
+      // 引擎出错，继续正常对话流程
     }
   }
 

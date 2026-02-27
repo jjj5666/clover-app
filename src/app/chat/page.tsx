@@ -5,12 +5,16 @@ import ReactMarkdown from 'react-markdown'
 import { createClient } from '@/lib/supabase/client'
 import { User } from '@supabase/supabase-js'
 import LogoutButton from './LogoutButton'
+import { CapabilityResult } from '@/capabilities/renderers/CapabilityResult'
 
 interface Message {
   role: 'user' | 'assistant'
   content: string
-  imageData?: string  // base64 encoded image
-  mimeType?: string   // image mime type
+  capabilityResult?: {
+    capabilityId: string
+    renderType: string
+    result: any
+  }
 }
 
 interface Session {
@@ -139,21 +143,24 @@ export default function ChatPage() {
         return
       }
 
-      // 检查是否是图片响应（非流式）
+      // 检查是否是能力响应（非流式）
       const contentType = res.headers.get('Content-Type')
       if (contentType?.includes('application/json')) {
         const data = await res.json()
-        if (data.type === 'image') {
-          // 图片生成响应
+        if (data.type === 'capability') {
+          // 能力执行响应
           setMessages(prev => {
             const updated = [...prev]
             const last = updated[updated.length - 1]
             if (last?.role === 'assistant') {
               updated[updated.length - 1] = { 
                 ...last, 
-                content: data.message,
-                imageData: data.imageData,
-                mimeType: data.mimeType
+                content: data.result.metadata?.description || '',
+                capabilityResult: {
+                  capabilityId: data.capabilityId,
+                  renderType: data.renderType,
+                  result: data.result,
+                }
               }
             }
             return updated
@@ -327,13 +334,21 @@ export default function ChatPage() {
                     ? 'bg-green-500 text-white rounded-br-sm'
                     : 'bg-white text-gray-800 border border-gray-200 rounded-bl-sm shadow-sm'
                 }`}>
-                  {/* 图片消息 */}
-                  {msg.imageData && (
+                  {/* 能力结果消息 */}
+                  {msg.capabilityResult && (
                     <div className="mb-2">
-                      <img 
-                        src={`data:${msg.mimeType || 'image/png'};base64,${msg.imageData}`}
-                        alt="Generated image"
-                        className="max-w-full rounded-lg"
+                      <CapabilityResult 
+                        renderType={msg.capabilityResult.renderType}
+                        data={msg.capabilityResult.result.data}
+                        actions={msg.capabilityResult.result.metadata?.actions}
+                        onAction={(action) => {
+                          // 处理Action点击
+                          if (action.type === 'modify') {
+                            setInput(`修改：${action.payload?.description || action.payload?.prompt || ''}`)
+                          } else if (action.type === 'retry') {
+                            sendMessage()
+                          }
+                        }}
                       />
                     </div>
                   )}
