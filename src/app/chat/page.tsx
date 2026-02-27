@@ -13,6 +13,7 @@ interface Message {
 interface Session {
   id: string
   created_at: string
+  title: string | null
 }
 
 export default function ChatPage() {
@@ -44,7 +45,7 @@ export default function ChatPage() {
   const loadSessions = async () => {
     const { data } = await supabase
       .from('sessions')
-      .select('id, created_at')
+      .select('id, created_at, title')
       .order('created_at', { ascending: false })
       .limit(30)
     if (data) setSessions(data)
@@ -232,7 +233,8 @@ export default function ChatPage() {
                 currentSessionId === s.id ? 'bg-green-50 text-green-700' : 'text-gray-600'
               }`}
             >
-              {formatDate(s.created_at)}
+              <span className="block truncate">{s.title || formatDate(s.created_at)}</span>
+              {s.title && <span className="block text-xs text-gray-400 truncate">{formatDate(s.created_at)}</span>}
             </button>
           ))}
           {sessions.length === 0 && (

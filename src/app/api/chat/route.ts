@@ -5,6 +5,34 @@ import { getDailySummaries } from '@/lib/memory/summary'
 import { checkLimit } from '@/lib/billing/limits'
 import { embedMessage, searchMessages } from '@/lib/memory/search'
 
+// 异步生成 session 标题
+async function generateSessionTitle(supabase: any, sessionId: string, firstMessage: string) {
+  try {
+    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'moonshotai/kimi-k2.5',
+        messages: [
+          {
+            role: 'system',
+            content: '根据用户的第一条消息，生成一个简短的对话标题（5-10个字）。只返回标题，不要引号或其他内容。',
+          },
+          { role: 'user', content: firstMessage },
+        ],
+      }),
+    })
+    const data = await res.json()
+    const title = data.choices?.[0]?.message?.content?.trim()
+    if (title) {
+      await supabase.from('sessions').update({ title }).eq('id', sessionId)
+    }
+  } catch {}
+}
+
 // 基础系统提示词
 const BASE_SYSTEM_PROMPT = `You are Clover, a friendly AI assistant.
 
@@ -76,6 +104,72 @@ ${existingMemory || '（空）'}
     // NO_UPDATE 表示没有值得记忆的新信息，跳过写入
     if (newMemory && newMemory !== 'NO_UPDATE' && newMemory !== existingMemory) {
       await updateProfile(supabase, userId, newMemory)
+    }
+
+    // 同时提取人物关系
+    await extractEntities(supabase, userId, userMessage)
+  } catch {
+    // 提取失败不影响主流程
+  }
+}
+
+// 从对话中提取人物和关系
+async function extractEntities(supabase: any, userId: string, userMessage: string) {
+  try {
+    const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'moonshotai/kimi-k2.5',
+        messages: [
+          {
+            role: 'system',
+            content: `从用户消息中提取提到的人物。只提取明确提到的、与用户有关系的人。
+
+如果没有提到任何人，只返回：NONE
+
+如果有，返回JSON数组，每个元素：
+{"name": "人名", "type": "person", "relation": "关系（同事/朋友/家人/伴侣/客户等）"}
+
+只返回JSON或NONE，不要其他内容。`,
+          },
+          { role: 'user', content: userMessage },
+        ],
+      }),
+    })
+
+    const data = await res.json()
+    const result = data.choices?.[0]?.message?.content?.trim()
+    if (!result || result === 'NONE') return
+
+    const entities = JSON.parse(result)
+    for (const entity of entities) {
+      // upsert：存在则更新提及次数，不存在则新建
+      const { data: existing } = await supabase
+        .from('user_entities')
+        .select('id, mention_count')
+        .eq('user_id', userId)
+        .eq('name', entity.name)
+        .single()
+
+      if (existing) {
+        await supabase.from('user_entities').update({
+          mention_count: existing.mention_count + 1,
+          last_mentioned_at: new Date().toISOString(),
+          relation: entity.relation,
+        }).eq('id', existing.id)
+      } else {
+        await supabase.from('user_entities').insert({
+          user_id: userId,
+          name: entity.name,
+          type: entity.type,
+          relation: entity.relation,
+          last_mentioned_at: new Date().toISOString(),
+        })
+      }
     }
   } catch {
     // 提取失败不影响主流程
@@ -209,10 +303,22 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // 构造系统提示：基础 + 画像 + 摘要 + 上次对话尾巴
+  // 加载用户的人际关系
+  const { data: entities } = await supabase
+    .from('user_entities')
+    .select('name, relation, notes')
+    .eq('user_id', user.id)
+    .order('mention_count', { ascending: false })
+    .limit(10)
+
+  // 构造系统提示：基础 + 画像 + 关系 + 摘要 + 上次对话尾巴
   let systemPrompt = BASE_SYSTEM_PROMPT
   if (memoryContent) {
     systemPrompt += `\n\n[Background knowledge about the user — do not recite, just use when relevant]\n${memoryContent}`
+  }
+  if (entities && entities.length > 0) {
+    const relText = entities.map((e: any) => `- ${e.name}：${e.relation || '未知关系'}${e.notes ? ' (' + e.notes + ')' : ''}`).join('\n')
+    systemPrompt += `\n\n[People the user has mentioned]\n${relText}`
   }
   if (summaries.length > 0) {
     const summaryText = summaries
@@ -311,6 +417,11 @@ export async function POST(req: NextRequest) {
         // 流结束后保存 assistant 消息 + 自动提取记忆
         if (fullResponse) {
           await saveMessage(supabase, sessionId, user.id, 'assistant', fullResponse)
+
+          // 异步生成session标题（仅第一轮）
+          if (messages.length <= 1) {
+            generateSessionTitle(supabase, sessionId, lastUserMsg?.content || '')
+          }
 
           // 异步提取记忆，不阻塞响应
           autoExtractMemory(
