@@ -203,10 +203,7 @@ export default function ChatPage() {
   }
 
   // 格式化 session 日期
-  // Builder 命令检测
-const BUILDER_PATTERN = /^/(builder|make|create)\s+(.+)$/i
-
-const formatDate = (iso: string) => {
+  const formatDate = (iso: string) => {
     const d = new Date(iso)
     const today = new Date()
     const time = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })

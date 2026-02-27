@@ -29,7 +29,7 @@ export async function deployApp(
         next: '^15.0.0',
         react: '^19.0.0',
         'react-dom': '^19.0.0',
-        lucide-react: '^0.460.0'
+        'lucide-react': '^0.460.0'
       },
       devDependencies: {
         typescript: '^5',
