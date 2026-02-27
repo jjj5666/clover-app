@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Loader2, Wand2, Globe, Code, Check, Copy } from 'lucide-react'
+import { Loader2, Wand2, Globe, Code, Check, Copy, Sparkles, Rocket } from 'lucide-react'
 
 interface BuilderResult {
   code: string
@@ -10,9 +10,12 @@ interface BuilderResult {
   preview?: boolean
 }
 
+type BuildStatus = 'idle' | 'generating' | 'deploying' | 'done' | 'error'
+
 export function BuilderPanel() {
   const [description, setDescription] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [status, setStatus] = useState<BuildStatus>('idle')
+  const [progress, setProgress] = useState(0)
   const [result, setResult] = useState<BuilderResult | null>(null)
   const [error, setError] = useState('')
   const [copied, setCopied] = useState(false)
@@ -20,11 +23,13 @@ export function BuilderPanel() {
   const generateApp = async () => {
     if (!description.trim()) return
     
-    setLoading(true)
+    setStatus('generating')
+    setProgress(10)
     setError('')
     setResult(null)
 
     try {
+      // 阶段 1：生成代码
       const res = await fetch('/api/builder', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -34,11 +39,43 @@ export function BuilderPanel() {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
 
+      setProgress(50)
       setResult(data)
+
+      // 阶段 2：如果有 deployId，轮询部署状态
+      if (data.deployId) {
+        setStatus('deploying')
+        setProgress(60)
+        
+        // 轮询部署状态，最多 30 秒
+        let attempts = 0
+        const maxAttempts = 30
+        
+        while (attempts < maxAttempts) {
+          await new Promise(r => setTimeout(r, 1000))
+          attempts++
+          
+          setProgress(60 + Math.min(35, attempts))
+          
+          try {
+            const statusRes = await fetch(`/api/builder?deployId=${data.deployId}`)
+            const statusData = await statusRes.json()
+            
+            if (statusData.ready) {
+              setResult(prev => prev ? { ...prev, deployUrl: statusData.url } : null)
+              break
+            }
+          } catch {
+            // 忽略轮询错误
+          }
+        }
+      }
+
+      setProgress(100)
+      setStatus('done')
     } catch (err: any) {
       setError(err.message || '生成失败')
-    } finally {
-      setLoading(false)
+      setStatus('error')
     }
   }
 
@@ -67,21 +104,54 @@ export function BuilderPanel() {
         
         <button
           onClick={generateApp}
-          disabled={loading || !description.trim()}
+          disabled={status !== 'idle' || !description.trim()}
           className="w-full py-3 px-6 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
         >
-          {loading ? (
-            <>
-              <Loader2 className="w-5 h-5 animate-spin" />
-              生成中...
-            </>
-          ) : (
+          {status === 'idle' ? (
             <>
               <Wand2 className="w-5 h-5" />
               生成应用
             </>
+          ) : status === 'generating' ? (
+            <>
+              <Sparkles className="w-5 h-5 animate-pulse" />
+              AI 正在写代码...
+            </>
+          ) : status === 'deploying' ? (
+            <>
+              <Rocket className="w-5 h-5 animate-bounce" />
+              部署到云端...
+            </>
+          ) : (
+            <>
+              <Check className="w-5 h-5" />
+              完成！
+            </>
           )}
         </button>
+
+        {/* 进度条 */}
+        {status !== 'idle' && status !== 'error' && (
+          <div className="space-y-2">
+            <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+              <div 
+                className="h-full bg-blue-600 transition-all duration-500 ease-out"
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+            <div className="flex justify-between text-xs text-gray-500">
+              <span className={status === 'generating' ? 'text-blue-600 font-medium' : ''}>
+                {status === 'generating' ? '● ' : ''}生成代码
+              </span>
+              <span className={status === 'deploying' ? 'text-blue-600 font-medium' : ''}>
+                {status === 'deploying' ? '● ' : ''}部署上线
+              </span>
+              <span className={status === 'done' ? 'text-green-600 font-medium' : ''}>
+                {status === 'done' ? '● ' : ''}完成
+              </span>
+            </div>
+          </div>
+        )}
       </div>
 
       {error && (
