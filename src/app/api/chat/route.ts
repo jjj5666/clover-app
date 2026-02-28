@@ -9,6 +9,12 @@ import { compressMemory } from '@/lib/memory/observer'
 import { getCompressedSessionMessages } from '@/lib/memory/session'
 import { createEngine } from '@/capabilities'
 
+// 静态导入确保能力在 Serverless 冷启动时注册
+import '@/capabilities/providers/image-generation'
+import '@/capabilities/providers/builder'
+import '@/capabilities/providers/daily-review'
+import '@/capabilities/providers/screen-time'
+
 // Session 压缩常量
 const COMPRESSION_THRESHOLD = 20  // 超过20轮触发压缩
 const KEEP_LAST_ROUNDS = 5        // 保留最后5轮完整对话
