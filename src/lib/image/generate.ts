@@ -1,32 +1,29 @@
-// Image generation using Google Gemini API (Nano Banana 2)
-// Direct API call to Google's generative language API
+// Image generation using OpenRouter (Gemini 3.1 Flash Image)
 
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp-image-generation:generateContent'
+const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions'
 
 export async function generateImage(
   prompt: string,
   apiKey: string
 ): Promise<{ imageData: string; mimeType: string }> {
-  const url = `${GEMINI_API_URL}?key=${apiKey}`
-  
-  const res = await fetch(url, {
+  const res = await fetch(OPENROUTER_API_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+      'HTTP-Referer': 'https://clover.app',
+      'X-Title': 'Clover',
     },
     body: JSON.stringify({
-      contents: [
+      model: 'google/gemini-3.1-flash-image-preview',
+      messages: [
         {
           role: 'user',
-          parts: [
-            { text: `Generate an image: ${prompt}` }
+          content: [
+            { type: 'text', text: `Generate an image: ${prompt}` }
           ]
         }
-      ],
-      generationConfig: {
-        responseModalities: ['Text', 'Image'],
-        temperature: 0.7,
-      }
+      ]
     })
   })
 
@@ -38,17 +35,48 @@ export async function generateImage(
   const data = await res.json()
   
   // Extract image from response
-  // Gemini returns image in candidates[0].content.parts[n].inlineData
-  const candidates = data.candidates || []
-  for (const candidate of candidates) {
-    const parts = candidate.content?.parts || []
-    for (const part of parts) {
-      if (part.inlineData?.data) {
-        return {
-          imageData: part.inlineData.data,  // base64 encoded
-          mimeType: part.inlineData.mimeType || 'image/png'
+  // OpenRouter/Gemini returns image in content as markdown or direct base64
+  const message = data.choices?.[0]?.message
+  if (!message) {
+    throw new Error('No response from image model')
+  }
+
+  // Check for image content in parts (new format)
+  if (message.content && Array.isArray(message.content)) {
+    for (const part of message.content) {
+      if (part.type === 'image_url' && part.image_url?.url) {
+        const url = part.image_url.url
+        if (url.startsWith('data:image')) {
+          const parts = url.split(',')
+          const mimeMatch = parts[0].match(/data:([^;]+)/)
+          return {
+            imageData: parts[1],
+            mimeType: mimeMatch?.[1] || 'image/png'
+          }
         }
       }
+    }
+  }
+
+  // Fallback: check content as string
+  const content = typeof message.content === 'string' ? message.content : ''
+  
+  // Parse base64 image from markdown: ![...](data:image/png;base64,...)
+  const base64Match = content.match(/data:image\/([a-z]+);base64,([A-Za-z0-9+/=]+)/)
+  if (base64Match) {
+    return {
+      imageData: base64Match[2],
+      mimeType: `image/${base64Match[1]}`
+    }
+  }
+
+  // Alternative: content might be direct base64
+  if (content.startsWith('data:image')) {
+    const parts = content.split(',')
+    const mimeMatch = parts[0].match(/data:([^;]+)/)
+    return {
+      imageData: parts[1],
+      mimeType: mimeMatch?.[1] || 'image/png'
     }
   }
 
