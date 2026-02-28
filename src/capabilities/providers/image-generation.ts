@@ -57,12 +57,12 @@ registerCapability({
   },
 
   execute: async (params: any, context: ExecutionContext): Promise<ExecutionResult> => {
-    const openRouterKey = process.env.OPENROUTER_API_KEY;
-    if (!openRouterKey) {
+    const geminiKey = process.env.GEMINI_API_KEY;
+    if (!geminiKey) {
       return {
         success: false,
         data: null,
-        error: '图片生成功能未配置',
+        error: '图片生成功能未配置（缺少 GEMINI_API_KEY）',
       };
     }
 
@@ -73,7 +73,7 @@ registerCapability({
         fullPrompt = `${fullPrompt}，${params.style}风格`;
       }
 
-      const { imageData, mimeType } = await generateImage(fullPrompt, openRouterKey);
+      const { imageData, mimeType } = await generateImage(fullPrompt, geminiKey);
 
       return {
         success: true,
