@@ -1,36 +1,60 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Clover - AI Assistant with Automatic Memory
+
+An AI assistant that **remembers who you are** across sessions, without any configuration. Unlike ChatGPT or Claude, Clover automatically builds a persistent memory of your identity, preferences, and conversation history.
+
+## Problem
+
+Every time you open ChatGPT, you start from scratch. The AI doesn't know your name, your job, what you talked about yesterday, or what matters to you. You end up repeating context over and over. For people who want a daily AI companion, this is a terrible experience.
+
+## Solution
+
+Clover is an AI assistant with a **3-layer automatic memory system**:
+
+- **Working Memory** — current session context, what you're talking about right now
+- **Experience Memory** — daily summaries stored with vector search, so the AI recalls past conversations naturally
+- **Identity Memory** — your profile, relationships, preferences, automatically extracted and updated over time
+
+The AI gets smarter the more you use it. It knows your name, remembers your projects, understands your communication style, and can reference things you discussed weeks ago.
+
+## Key Features
+
+- **Smart Model Routing** — cheap model (Kimi K2.5) for simple queries, Claude Sonnet for complex ones, saving cost without sacrificing quality
+- **AI Image Generation** — generate images via Gemini through natural conversation
+- **App Builder** — describe an app in chat, AI generates and deploys it to Vercel
+- **Daily Review** — automatic daily summaries of your conversations and insights
+- **Streaming Responses** — real-time SSE streaming for fast, responsive chat
+
+## Tech Stack
+
+- Next.js 16 (App Router)
+- Supabase (Auth + PostgreSQL + Vector Search)
+- OpenRouter (multi-model: GPT-5.4, Claude Sonnet 4.6, Kimi K2.5, Gemini)
+- Tailwind CSS 4
+- TypeScript
+- Lemon Squeezy (billing: Free / Pro $9.9/mo)
+
+## Architecture
+
+```
+User Input → Model Router (cheap vs complex)
+                ↓
+         Chat Response (streaming SSE)
+                ↓
+         Memory Pipeline:
+         ├── Working Memory (session context)
+         ├── Experience Memory (daily summaries → vector DB)
+         └── Identity Memory (user profile extraction)
+```
 
 ## Getting Started
 
-First, run the development server:
-
 ```bash
+cp .env.example .env.local
+# Fill in: OPENROUTER_API_KEY, SUPABASE_URL, SUPABASE_ANON_KEY
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## License
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+MIT
